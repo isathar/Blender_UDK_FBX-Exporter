@@ -24,3 +24,15 @@ http://blenderartists.org/forum/showthread.php?251402-Addon-Recalc-Vertex-Normal
 -- removed XNA-specific options from menu
 
 -- uses the root bone as root instead of creating its own
+
+
+--------------------------------------
+
+______________________________________
+In progress: 
+
+Tangents + Binormals,
+split vertex normals
+
+
+______________________________________
