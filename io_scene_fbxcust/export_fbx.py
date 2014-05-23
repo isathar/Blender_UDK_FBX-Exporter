@@ -28,6 +28,8 @@ import math  # math.pi
 import bpy
 from mathutils import Vector, Matrix
 
+from bpy_extras.io_utils import axis_conversion
+
 # I guess FBX uses degrees instead of radians (Arystan).
 # Call this function just before writing to FBX.
 # 180 / math.pi == 57.295779513
@@ -213,19 +215,19 @@ def save_single(operator, scene, filepath="",
         global_matrix=None,
         context_objects=None,
         object_types={'EMPTY', 'CAMERA', 'LAMP', 'ARMATURE', 'MESH'},
-        use_mesh_modifiers=True,
+        use_mesh_modifiers=False,
+        axis_setting='STATICMESH',
         mesh_smooth_type='FACE',
         use_armature_deform_only=False,
-        use_anim=True,
-        use_anim_optimize=True,
+        use_anim=False,
+        use_anim_optimize=False,
         anim_optimize_precision=6,
         use_anim_action_all=False,
-        use_metadata=True,
         path_mode='AUTO',
-        use_mesh_edges=True,
-        use_rotate_workaround=False,
-        use_default_take=True,
-		use_custom_normals=True,
+        use_mesh_edges=False,
+        use_default_take=False,
+		normals_export_mode='AUTO',
+		export_tangents=True,
     ):
 
     import bpy_extras.io_utils
@@ -235,9 +237,6 @@ def save_single(operator, scene, filepath="",
     # Used for mesh and armature rotations
     mtx4_z90 = Matrix.Rotation(math.pi / 2.0, 4, 'Z')
     # Rotation does not work for XNA animations.  I do not know why but they end up a mess! (JCB)
-    if use_rotate_workaround:
-        # Set rotation to Matrix Identity for XNA (JCB)
-        mtx4_z90.identity()
 
     if global_matrix is None:
         global_matrix = Matrix()
@@ -432,10 +431,7 @@ def save_single(operator, scene, filepath="",
 
     # ---------------------------- Write the header first
     fw(header_comment)
-    if use_metadata:
-        curtime = time.localtime()[0:6]
-    else:
-        curtime = (0, 0, 0, 0, 0, 0)
+    curtime = time.localtime()[0:6]
     #
     fw(
 '''FBXHeaderExtension:  {
@@ -451,7 +447,7 @@ def save_single(operator, scene, filepath="",
 		Second: %.2i
 		Millisecond: 0
 	}
-	Creator: "FBX SDK/FBX Plugins build 20070228"
+	Creator: "FBX SDK/FBX Plugins build 20070228 (customized)"
 	OtherFlags:  {
 		FlagPLE: 0
 	}
@@ -485,10 +481,6 @@ def save_single(operator, scene, filepath="",
             loc = tuple(loc)
             rot = tuple(rot.to_euler())  # quat -> euler
             scale = tuple(scale)
-
-            # Essential for XNA to use the original matrix not rotated nor scaled (JCB)
-            if use_rotate_workaround:
-                matrix = ob.matrix_local
 
         else:
             # This is bad because we need the parent relative matrix from the fbx parent (if we have one), dont use anymore
@@ -1369,14 +1361,111 @@ def save_single(operator, scene, filepath="",
         me_vertices = me.vertices[:]
         me_edges = me.edges[:] if use_mesh_edges else ()
         me_faces = me.tessfaces[:]
+        
 
-        if use_custom_normals:
+        ##############################
+        # Normals, Tangents, Binormals
+
+        me_normals = []
+        me_tangents = []
+        me_binormals = []
+        temp_smoothgroups = []
+        me_smoothgroups = []
+
+        sharp_edges = []
+
+        temp_edges = me.edges
+
+
+        # custom normals - Recalc Vertex Normals script: Works 100%
+        if normals_export_mode == 'C_ASDN':
             if 'vertex_normal_list' in bpy.context.active_object:
-                me_normals = bpy.context.active_object.vertex_normal_list[:]
+                normaltranslate = axis_conversion(from_forward='-Z',from_up='Y',to_forward='Y',to_up='Z')
+                for mf in me_faces:
+                    for vn in mf.vertices:
+                        vnl = bpy.context.active_object.vertex_normal_list[vn]
+                        normvec = Vector(vnl.normal)
+                        if axis_setting == 'SKELMESH':
+                            normvec = normvec * normaltranslate
+                        me_normals = me_normals + [normvec]
             else:
-                me_normals = me_vertices[:]
+                for mf in me_faces:
+                    for vn in mf.vertices:
+                        me_normals = me_normals + [me_vertices[vn].normal]
+
+        # sharp edges calculate normals (Buggy, WIP)
+        elif normals_export_mode == 'EDGES':
+            # build vertex list
+            for sedge in temp_edges:
+                if sedge.use_edge_sharp:
+                    if sedge.key[0] not in sharp_edges:
+                        sharp_edges = sharp_edges + [sedge.key[0]]
+                    if sedge.key[1] not in sharp_edges:
+                        sharp_edges = sharp_edges + [sedge.key[1]]
+                    print("Key = " + str(sedge.key))
+
+            procfaces = []
+            for mf in me_faces:
+                procfaces = procfaces + [mf]
+                for vs in mf.vertices:
+                    if vs in sharp_edges:
+                        foundother = False
+                        for mf2 in me_faces:
+                            if not foundother:
+                                if mf != mf2 and (mf2 not in procfaces):
+                                    if mf.normal.dot(mf2.normal) > 0.25:
+                                        foundother = True
+                                        me_normals = me_normals + [(mf.normal + mf2.normal) * 0.5]
+                        if not foundother:
+                            me_normals = me_normals + [mf.normal]
+                    else:
+                        me_normals = me_normals + [me_vertices[vs].normal]
+
+        # TBD: Smoothing groups generate normals
+        elif normals_export_mode == 'SGROUPS':
+            for mf in me_faces:
+                for vs in mf.vertices:
+                    me_normals = me_normals + [me_vertices[vs].normal]
+
+        # default normals -- fallback
         else:
-            me_normals = me_vertices[:]
+            for mf in me_faces:
+                for vs in mf.vertices:
+                    me_normals = me_normals + [me_vertices[vs].normal]
+
+
+        # Tangents + Binormals:
+        if export_tangents:
+            print("Calculating Tangents and Binormals...")
+            for tn in me_normals:
+                temptan1 = tn.cross((0.0,0.0,1.0))
+                temptan2 = tn.cross((0.0,1.0,0.0))
+
+                finaltan = (0.0,0.0,1.0)
+
+                if temptan1 > temptan2:
+                    finaltan = temptan1
+                else:
+                    finaltan = temptan2
+
+                me_tangents = me_tangents + [finaltan]
+                tempbinormal = finaltan.cross(tn)
+                me_binormals = me_binormals + [tempbinormal]
+
+
+        # init smoothing groups
+        temp_smoothgroups = bpy.context.active_object.fbx_smoothing_groups[:]
+        print("Converting Smoothing groups...")
+        for sg in temp_smoothgroups:
+            tempsg = 0
+            for i in range(sg.sgroup):
+                if (tempsg <= 1):
+                    tempsg = tempsg + 1
+                else:
+                    tempsg = tempsg * 2
+            me_smoothgroups = me_smoothgroups + [tempsg]
+            #print(str(sg.sgroup) + " --> " + str(tempsg))
+
 
         poseMatrix = write_object_props(my_mesh.blenObject, None, my_mesh.parRelMatrix())[3]
 
@@ -1469,20 +1558,62 @@ def save_single(operator, scene, filepath="",
 		LayerElementNormal: 0 {
 			Version: 101
 			Name: ""
-			MappingInformationType: "ByVertice"
+			MappingInformationType: "ByPolygonVertex"
 			ReferenceInformationType: "Direct"
 			Normals: ''')
 
         i = -1
         for v in me_normals:
             if i == -1:
-                fw('%.15f,%.15f,%.15f' % v.normal[:])
+                fw('%.15f,%.15f,%.15f' % v[:])
                 i = 0
             else:
                 if i == 2:
                     fw('\n\t\t\t ')
                     i = 0
-                fw(',%.15f,%.15f,%.15f' % v.normal[:])
+                fw(',%.15f,%.15f,%.15f'% v[:])
+            i += 1
+        fw('\n\t\t}')
+
+        fw('''
+		LayerElementBinormal: 0 {
+			Version: 101
+			Name: ""
+			MappingInformationType: "ByPolygonVertex"
+			ReferenceInformationType: "Direct"
+			Binormals: ''')
+
+        i = -1
+        for v in me_binormals:
+            if i == -1:
+                fw('%.15f,%.15f,%.15f' % v[:])
+                i = 0
+            else:
+                if i == 2:
+                    fw('\n\t\t\t ')
+                    i = 0
+                fw(',%.15f,%.15f,%.15f'% v[:])
+            i += 1
+        fw('\n\t\t}')
+
+        fw('''
+		LayerElementTangent: 0 {
+			Version: 101
+			Name: ""
+			MappingInformationType: "ByPolygonVertex"
+			ReferenceInformationType: "Direct"
+			Tangents: ''')
+
+        i = -1
+        for v in me_tangents:
+            if i == -1:
+                fw('%.15f,%.15f,%.15f' % v[:])
+                i = 0
+            else:
+                if i == 2:
+                    fw('\n\t\t\t ')
+                    i = 0
+                fw(',%.15f,%.15f,%.15f'% v[:])
             i += 1
         fw('\n\t\t}')
 
@@ -1544,18 +1675,18 @@ def save_single(operator, scene, filepath="",
 			ReferenceInformationType: "Direct"
 			Smoothing: ''')
 
-            me_smoothgroups = bpy.context.active_object.fbx_smoothing_groups[:]
-
             i = -1
-            for f in me_smoothgroups:
+            # for f in me_smoothgroups:
+            for f in me_faces:
                 if i == -1:
-                    fw('%i' % f.sgroup)
+                    #fw('%i' % f.sgroup)
+                    fw('%i' % me_smoothgroups[f.index])
                     i = 0
                 else:
                     if i == 54:
                         fw('\n\t\t\t ')
                         i = 0
-                    fw(',%i' % f.sgroup)
+                    fw(',%i' % me_smoothgroups[f.index])
                 i += 1
 
             fw('\n\t\t}')
@@ -1775,6 +1906,18 @@ def save_single(operator, scene, filepath="",
 			Version: 100
 			LayerElement:  {
 				Type: "LayerElementNormal"
+				TypedIndex: 0
+			}''')
+
+        fw('''
+			LayerElement:  {
+				Type: "LayerElementBinormal"
+				TypedIndex: 0
+			}''')
+
+        fw('''
+			LayerElement:  {
+				Type: "LayerElementTangent"
 				TypedIndex: 0
 			}''')
 

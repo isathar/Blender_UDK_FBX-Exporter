@@ -21,6 +21,13 @@ http://blenderartists.org/forum/showthread.php?251402-Addon-Recalc-Vertex-Normal
 
 (TBD: support for other normals addons)
 
+-- calculates + exports tangents and binormals.
+
+(The default exporter skipped these entirely)
+
+-- supports custom normals for UDK skeletal meshes
+
+
 -- removed XNA-specific options from menu
 
 -- uses the root bone as root instead of creating its own
@@ -29,10 +36,8 @@ http://blenderartists.org/forum/showthread.php?251402-Addon-Recalc-Vertex-Normal
 --------------------------------------
 
 ______________________________________
-In progress: 
 
-Tangents + Binormals,
-split vertex normals
+
 
 
 ______________________________________
