@@ -1,34 +1,23 @@
-UDK Blender FBX Export
-======================
+UDK/UE4 Blender FBX Exporter  
+  
+Standalone exporter from my old normals editor.  
+based on the fbx exporter included in Blender 2.68  
+  
+--------------------------------------  
+  
+_ Additions + fixes _
+  
+- supports Blender's split normals, normals created by adsn's Rcalc Vertex Normals addon and my old FBX Normals Tools
+- exports Blender's tangents (Mikk TSpace) for custom normals
+- custom export UI panel
+- uses the root bone as root instead of creating its own
+  - includes some modifications to armature rotations to allow this
+- combine vertex color channels on export  
+  
+--------------------------------------  
+  
+_Changelog_
 
-Standalone exporter without vertex normals and smoothing groups editors.
-
-Can calculate and export tangents for custom normals.
-
-based on the fbx exporter included in Blender 2.68
-
-
-Additions + fixes:
-------------------
-
--- supports custom normals and smoothing groups created with my FBX Tools addon
-
--- Support for custom vertex normals created with asdn's Recalc Vertex Normals script available here:
-
-http://blenderartists.org/forum/showthread.php?251402-Addon-Recalc-Vertex-Normals
-
--- calculates + exports tangents and binormals for custom normals
-
--- removed XNA-specific options from menu
-
--- uses the root bone as root instead of creating its own
-
-
---------------------------------------
-
-______________________________________
-changelog:
-
-- updated to match FBX Tools version
-
-______________________________________
+*v1.0.0* (current):
+- updated to match final FBX Tools version  
+  
